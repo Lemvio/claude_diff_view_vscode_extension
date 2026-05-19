@@ -721,8 +721,11 @@ ${FONT_OPTIONS.map((f) => {
             navigator.clipboard.writeText(t.getSelection()).catch(() => {});
             return false;
           }
-          // Ctrl/Cmd+V pastes from clipboard (like a normal terminal).
+          // Ctrl/Cmd+V pastes from clipboard. preventDefault stops the browser's
+          // own paste event from firing, otherwise xterm's native paste handler
+          // would also process the clipboard and we'd get duplicated text.
           if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'v' || e.key === 'V')) {
+            e.preventDefault();
             navigator.clipboard.readText().then((text) => {
               if (text) t.paste(text);
             }).catch(() => {});
@@ -788,6 +791,16 @@ ${FONT_OPTIONS.map((f) => {
         const f = new FitAddon.FitAddon();
         t.loadAddon(f);
         t.open(host);
+        // Suppress xterm.js's native paste handler. We handle Ctrl/Cmd+V ourselves
+        // in attachCustomKeyEventHandler so the clipboard text is sent to the PTY
+        // exactly once (respecting bracketed paste mode via t.paste()).
+        const ta = host.querySelector('.xterm-helper-textarea');
+        if (ta) {
+          ta.addEventListener('paste', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+          }, true);
+        }
 
         const tab = buildTabDom(id, title);
         tabsEl.appendChild(tab);
