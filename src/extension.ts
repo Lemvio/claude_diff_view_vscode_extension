@@ -97,7 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
-      if (state.focused) {
+      if (state.focused && terminalPanel.wasTerminalFocused()) {
         terminalPanel.focusTerminal();
       }
     })

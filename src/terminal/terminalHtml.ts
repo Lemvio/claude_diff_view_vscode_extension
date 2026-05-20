@@ -800,6 +800,16 @@ ${FONT_OPTIONS.map((f) => {
             ev.preventDefault();
             ev.stopPropagation();
           }, true);
+          ta.addEventListener('focus', () => {
+            vscode.postMessage({ type: 'terminalFocusState', focused: true });
+          });
+          ta.addEventListener('blur', () => {
+            // Window-blur also fires this; ignore it so the stored state still
+            // reflects "terminal was focused" when the user alt-tabs away.
+            if (document.hasFocus()) {
+              vscode.postMessage({ type: 'terminalFocusState', focused: false });
+            }
+          });
         }
 
         const tab = buildTabDom(id, title);

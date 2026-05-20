@@ -39,6 +39,7 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
   private lastPrompt = '';
   private errorMessage = '';
   private diffDisposable?: vscode.Disposable;
+  private lastTerminalFocused = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -82,6 +83,10 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
       // view may not be resolvable yet; ignore.
     }
     void this.view.webview.postMessage({ type: 'focusTerminal' });
+  }
+
+  wasTerminalFocused(): boolean {
+    return this.lastTerminalFocused;
   }
 
   private postFilesUpdate(): void {
@@ -333,6 +338,9 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'introduceSeen':
           void this.context.globalState.update(INTRODUCE_SEEN_KEY, true);
+          return;
+        case 'terminalFocusState':
+          this.lastTerminalFocused = !!msg.focused;
           return;
       }
     });

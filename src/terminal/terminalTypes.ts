@@ -29,7 +29,8 @@ export type IncomingMessage =
   | { type: 'reloadWindow' }
   | { type: 'openFile'; path: string }
   | { type: 'installHooks' }
-  | { type: 'introduceSeen' };
+  | { type: 'introduceSeen' }
+  | { type: 'terminalFocusState'; focused: boolean };
 
 export const DEFAULT_SETTINGS: TerminalSettings = {
   fontFamily: 'Consolas, "Courier New", monospace',
