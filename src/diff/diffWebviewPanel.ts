@@ -21,7 +21,11 @@ type IncomingMsg =
   | { type: 'acceptAll' }
   | { type: 'rejectAll' }
   | { type: 'nextFile' }
-  | { type: 'prevFile' };
+  | { type: 'prevFile' }
+  | { type: 'save' }
+  | { type: 'undo' }
+  | { type: 'redo' }
+  | { type: 'cursor'; line: number; column: number };
 
 export class DiffEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(
@@ -99,6 +103,18 @@ export class DiffEditorProvider implements vscode.CustomTextEditorProvider {
             return;
           case 'prevFile':
             await this.gotoSibling(filePath, -1);
+            return;
+          case 'save':
+            await document.save();
+            return;
+          case 'undo':
+            await vscode.commands.executeCommand('undo');
+            return;
+          case 'redo':
+            await vscode.commands.executeCommand('redo');
+            return;
+          case 'cursor':
+            this.diffManager.setLastCursor(filePath, msg.line, msg.column);
             return;
         }
       })

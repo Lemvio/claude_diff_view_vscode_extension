@@ -18,6 +18,19 @@ function normalizePath(filePath: string): string {
   return process.platform === 'win32' ? fsPath.toLowerCase() : fsPath;
 }
 
+/**
+ * Trả về path với case canonical từ OS (Windows preserve case từ disk).
+ * Dùng khi gọi VS Code APIs để tab/tên file hiển thị đúng case như user.
+ * Fallback về input nếu file không tồn tại.
+ */
+function canonicalCasePath(filePath: string): string {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch {
+    return filePath;
+  }
+}
+
 export class DiffManager {
   private _onDidChangeDiffs = new vscode.EventEmitter<void>();
   public readonly onDidChangeDiffs = this._onDidChangeDiffs.event;
@@ -26,6 +39,8 @@ export class DiffManager {
   private readonly store: SnapshotStore;
   /** filePath (normalized) -> active webview panel. */
   private panels: Map<string, vscode.WebviewPanel> = new Map();
+  /** filePath (normalized) -> last cursor seen in Monaco modified editor. */
+  private lastCursors: Map<string, { line: number; column: number }> = new Map();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.store = new SnapshotStore(context.workspaceState);
@@ -74,13 +89,37 @@ export class DiffManager {
       return;
     }
 
+    await this.closeTextTabsFor(absPath);
+
     await vscode.commands.executeCommand(
       'vscode.openWith',
-      vscode.Uri.file(absPath),
+      vscode.Uri.file(canonicalCasePath(absPath)),
       DIFF_EDITOR_VIEW_TYPE,
       { preview: false } satisfies vscode.TextDocumentShowOptions
     );
     this._onDidChangeDiffs.fire();
+  }
+
+  /**
+   * Đóng mọi tab text editor đang trỏ tới file này, để diff editor mới mở
+   * không tạo tab thứ hai cùng file.
+   */
+  private async closeTextTabsFor(absPath: string): Promise<void> {
+    const targets: vscode.Tab[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (!(tab.input instanceof vscode.TabInputText)) { continue; }
+        if (normalizePath(tab.input.uri.fsPath) === absPath) {
+          targets.push(tab);
+        }
+      }
+    }
+    if (targets.length === 0) { return; }
+    try {
+      await vscode.window.tabGroups.close(targets);
+    } catch (err) {
+      console.error('[ai-cli-diff] closeTextTabsFor failed:', err);
+    }
   }
 
   loadSnapshot(filePath: string, content: string, fileExistedBefore = true): void {
@@ -110,6 +149,7 @@ export class DiffManager {
     this.snapshots.delete(absPath);
     void this.store.save(this.snapshots);
     this.closePanel(absPath);
+    await this.reopenAsTextEditor(absPath);
 
     if (nextTarget) {
       await this.openDiff(nextTarget);
@@ -142,6 +182,11 @@ export class DiffManager {
     this.snapshots.delete(absPath);
     void this.store.save(this.snapshots);
     this.closePanel(absPath);
+    if (snapshot.fileExistedBefore) {
+      await this.reopenAsTextEditor(absPath);
+    } else {
+      this.lastCursors.delete(absPath);
+    }
 
     if (nextTarget) {
       await this.openDiff(nextTarget);
@@ -176,6 +221,10 @@ export class DiffManager {
   /** Alias dùng bởi DiffEditorProvider; trả về content của snapshot (left side). */
   getSnapshotContent(filePath: string): string | undefined {
     return this.getSnapshot(filePath);
+  }
+
+  setLastCursor(filePath: string, line: number, column: number): void {
+    this.lastCursors.set(normalizePath(filePath), { line, column });
   }
 
   getActiveFilePath(): string | undefined {
@@ -232,6 +281,29 @@ export class DiffManager {
     if (panel) {
       this.panels.delete(absPath);
       panel.dispose();
+    }
+  }
+
+  private async reopenAsTextEditor(absPath: string): Promise<void> {
+    if (!fs.existsSync(absPath)) {
+      this.lastCursors.delete(absPath);
+      return;
+    }
+    const cursor = this.lastCursors.get(absPath);
+    this.lastCursors.delete(absPath);
+    const uri = vscode.Uri.file(canonicalCasePath(absPath));
+    const showOptions: vscode.TextDocumentShowOptions = { preview: false };
+    if (cursor) {
+      const pos = new vscode.Position(
+        Math.max(0, cursor.line - 1),
+        Math.max(0, cursor.column - 1)
+      );
+      showOptions.selection = new vscode.Range(pos, pos);
+    }
+    try {
+      await vscode.window.showTextDocument(uri, showOptions);
+    } catch (err) {
+      console.error('[ai-cli-diff] reopenAsTextEditor failed:', err);
     }
   }
 

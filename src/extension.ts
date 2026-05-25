@@ -121,6 +121,32 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.tabGroups.onDidChangeTabs(() => updateNavBarState())
   );
+
+  const autoRouteTab = (tab: vscode.Tab): void => {
+    if (!(tab.input instanceof vscode.TabInputText)) { return; }
+    const fsPath = tab.input.uri.fsPath;
+    if (!diffManager.hasPendingDiff(fsPath)) { return; }
+    void (async () => {
+      try {
+        await vscode.window.tabGroups.close(tab);
+        await diffManager.openDiff(fsPath);
+      } catch (err) {
+        console.error('[ai-cli-diff] auto-route failed:', err);
+      }
+    })();
+  };
+
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((e) => {
+      for (const tab of e.opened) { autoRouteTab(tab); }
+      for (const tab of e.changed) { autoRouteTab(tab); }
+    })
+  );
+
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) { autoRouteTab(tab); }
+  }
+
   updateNavBarState();
 }
 

@@ -19,6 +19,28 @@
   };
 
   require(['vs/editor/editor.main'], function () {
+    // Monaco standalone workers không biết tsconfig, node_modules, path alias,
+    // tailwind plugin... -> false positive khắp nơi. Tắt diagnostics, giữ
+    // tokenizer (màu code) và hover/completion.
+    if (monaco.languages.typescript) {
+      const diagOff = {
+        noSemanticValidation: true,
+        noSyntaxValidation: true,
+        noSuggestionDiagnostics: true,
+      };
+      monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(diagOff);
+      monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(diagOff);
+    }
+    if (monaco.languages.css) {
+      const cssOff = { validate: false };
+      monaco.languages.css.cssDefaults.setOptions(cssOff);
+      monaco.languages.css.scssDefaults.setOptions(cssOff);
+      monaco.languages.css.lessDefaults.setOptions(cssOff);
+    }
+    if (monaco.languages.json) {
+      monaco.languages.json.jsonDefaults.setDiagnosticsOptions({ validate: false });
+    }
+
     const state = {
       diffEditor: null,
       filePath: null,
@@ -27,7 +49,8 @@
       originalContent: '',
       currentContent: '',
       lineChanges: [],
-      viewZoneIds: [],
+      hunkWidgets: [],
+      hoveredHunkIdx: -1,
       didAutoReveal: false,
       currentTheme: 'vs-dark',
       inFlight: false,
@@ -57,6 +80,8 @@
     });
 
     const modifiedEditor = state.diffEditor.getModifiedEditor();
+    const originalEditor = state.diffEditor.getOriginalEditor();
+    originalEditor.updateOptions({ lineNumbers: 'off' });
 
     state.diffEditor.onDidUpdateDiff(() => refreshHunks());
 
@@ -71,6 +96,19 @@
         editDebounce = null;
         vscodeApi.postMessage({ type: 'editModified', newCurrent: value });
       }, 200);
+    });
+
+    let cursorDebounce = null;
+    modifiedEditor.onDidChangeCursorPosition((e) => {
+      if (cursorDebounce) { clearTimeout(cursorDebounce); }
+      cursorDebounce = setTimeout(() => {
+        cursorDebounce = null;
+        vscodeApi.postMessage({
+          type: 'cursor',
+          line: e.position.lineNumber,
+          column: e.position.column,
+        });
+      }, 150);
     });
 
     registerActions();
@@ -208,32 +246,59 @@
           return;
         }
         state.lineChanges = changes || [];
-        renderViewZones();
+        renderHunkWidgets();
         maybeAutoReveal();
       };
       tryGet();
     }
 
-    function renderViewZones() {
-      modifiedEditor.changeViewZones((accessor) => {
-        for (const id of state.viewZoneIds) {
-          accessor.removeZone(id);
-        }
-        state.viewZoneIds = [];
+    /**
+     * Mỗi hunk = 1 Monaco Content Widget chứa nút Accept/Reject, ẩn mặc định
+     * (opacity 0). Khi cursor/chuột nằm trong vùng hunk, set class .visible
+     * để fade in. Bám vào dòng đầu của hunk, đẩy sang phải bằng CSS để nằm
+     * bên rìa code.
+     */
+    function renderHunkWidgets() {
+      for (const w of state.hunkWidgets) {
+        modifiedEditor.removeOverlayWidget(w);
+      }
+      state.hunkWidgets = [];
+      state.hoveredHunkIdx = -1;
 
-        state.lineChanges.forEach((change, idx) => {
-          const dom = makeHunkBar(change, idx);
-          const afterLineNumber = hunkAfterLineNumber(change);
-          const id = accessor.addZone({
-            afterLineNumber,
-            heightInLines: 1.4,
-            domNode: dom,
-            suppressMouseDown: true,
-          });
-          state.viewZoneIds.push(id);
-        });
+      state.lineChanges.forEach((change, idx) => {
+        const dom = makeHunkBar(change, idx);
+        const widget = {
+          _idx: idx,
+          _change: change,
+          _dom: dom,
+          getId: () => `ai-cli-diff.hunkBar.${idx}`,
+          getDomNode: () => dom,
+          // null = không dùng anchor preset, tự positioning qua CSS top/right.
+          getPosition: () => null,
+        };
+        modifiedEditor.addOverlayWidget(widget);
+        state.hunkWidgets.push(widget);
       });
+
+      repositionAllBars();
+      updateHoveredHunkFromCursor();
     }
+
+    /**
+     * Cập nhật `top` cho mỗi bar dựa trên pixel offset của dòng đầu hunk
+     * (trừ scrollTop hiện tại). Bar nằm cố định bên phải viewport editor.
+     */
+    function repositionAllBars() {
+      const scrollTop = modifiedEditor.getScrollTop();
+      for (const w of state.hunkWidgets) {
+        const line = hunkAnchorLine(w._change);
+        const top = modifiedEditor.getTopForLineNumber(line) - scrollTop;
+        w._dom.style.top = `${top}px`;
+      }
+    }
+
+    modifiedEditor.onDidScrollChange(() => repositionAllBars());
+    modifiedEditor.onDidLayoutChange(() => repositionAllBars());
 
     function maybeAutoReveal() {
       if (state.didAutoReveal || state.lineChanges.length === 0) { return; }
@@ -245,27 +310,67 @@
     }
 
     /**
-     * Anchor line for ViewZone (1-indexed afterLineNumber means zone appears
-     * AFTER that line). For pure deletions (modifiedEnd===0), anchor on the
-     * insertion point line. For additions/modifications, anchor on the LAST
-     * line of the modified hunk so the bar sits right under the change.
+     * Anchor line cho Content Widget: dòng đầu của hunk (modifiedStart).
+     * Với pure deletion (modifiedEnd===0), bám vào dòng kề trước/kề sau.
      */
-    function hunkAfterLineNumber(change) {
+    function hunkAnchorLine(change) {
       if (change.modifiedEndLineNumber === 0 || change.modifiedEndLineNumber < change.modifiedStartLineNumber) {
-        return Math.max(0, change.modifiedStartLineNumber - 1);
+        return Math.max(1, change.modifiedStartLineNumber);
       }
-      return change.modifiedEndLineNumber;
+      return change.modifiedStartLineNumber;
     }
+
+    /** Hunk index chứa dòng `line` (modified side), hoặc -1 nếu không trong hunk nào. */
+    function findHunkIdxAtLine(line) {
+      if (!line || line < 1) { return -1; }
+      for (let i = 0; i < state.lineChanges.length; i++) {
+        const c = state.lineChanges[i];
+        const start = c.modifiedStartLineNumber;
+        const end = c.modifiedEndLineNumber === 0 ? start : c.modifiedEndLineNumber;
+        if (line >= start && line <= end) { return i; }
+      }
+      return -1;
+    }
+
+    function setHoveredHunk(idx) {
+      if (idx === state.hoveredHunkIdx) { return; }
+      state.hoveredHunkIdx = idx;
+      state.hunkWidgets.forEach((w, i) => {
+        const dom = w.getDomNode();
+        if (i === idx) {
+          dom.classList.add('visible');
+        } else {
+          dom.classList.remove('visible');
+        }
+      });
+    }
+
+    function updateHoveredHunkFromCursor() {
+      const pos = modifiedEditor.getPosition();
+      setHoveredHunk(pos ? findHunkIdxAtLine(pos.lineNumber) : -1);
+    }
+
+    modifiedEditor.onMouseMove((e) => {
+      const line = e.target && e.target.position && e.target.position.lineNumber;
+      if (!line) { return; }
+      const idx = findHunkIdxAtLine(line);
+      if (idx !== -1) { setHoveredHunk(idx); }
+    });
+
+    modifiedEditor.onMouseLeave(() => {
+      updateHoveredHunkFromCursor();
+    });
+
+    modifiedEditor.onDidChangeCursorPosition(() => {
+      updateHoveredHunkFromCursor();
+    });
 
     function makeHunkBar(change, idx) {
       const node = document.createElement('div');
       node.className = 'hunk-bar';
-      node.style.pointerEvents = 'auto';
+      node.dataset.hunkIdx = String(idx);
 
-      const label = document.createElement('span');
-      label.className = 'hunk-label';
-      label.textContent = `Hunk ${idx + 1}`;
-      node.appendChild(label);
+      node.addEventListener('mouseenter', () => setHoveredHunk(idx));
 
       const acceptBtn = document.createElement('button');
       acceptBtn.className = 'hunk-btn accept';
@@ -348,6 +453,29 @@
         label: 'AI CLI Diff: Previous File',
         keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyH],
         run: () => vscodeApi.postMessage({ type: 'prevFile' }),
+      });
+      modifiedEditor.addAction({
+        id: 'ai-cli-diff.acceptAll',
+        label: 'AI CLI Diff: Accept All Hunks',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyY],
+        run: () => {
+          if (state.inFlight) { return; }
+          setInFlight(true);
+          vscodeApi.postMessage({ type: 'acceptAll' });
+        },
+      });
+      modifiedEditor.addAction({
+        id: 'ai-cli-diff.save',
+        label: 'AI CLI Diff: Save',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        run: () => vscodeApi.postMessage({ type: 'save' }),
+      });
+      // Override Monaco's local undo/redo so VS Code's WorkspaceEdit stack stays the single source of truth.
+      modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
+        vscodeApi.postMessage({ type: 'undo' });
+      });
+      modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => {
+        vscodeApi.postMessage({ type: 'redo' });
       });
     }
 
