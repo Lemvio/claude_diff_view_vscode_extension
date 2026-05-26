@@ -204,3 +204,100 @@ body {
 .hunk-btn.reject:hover {
   background: rgba(248, 81, 73, 0.55);
 }
+
+/* ============================================================
+ * Monaco chrome theme override.
+ * Sync editor surface (background, gutter, cursor, selection, ...) with the
+ * active VS Code theme via --vscode-* CSS variables. Syntax tokens, minimap,
+ * and bracket pair colorization are intentionally out of scope — Monaco's
+ * builtin theme keeps owning those.
+ * !important is required on most rules because Monaco's builtin theme writes
+ * inline styles on these elements at render time.
+ * ============================================================ */
+
+.monaco-editor,
+.monaco-editor-background,
+.monaco-editor .inputarea.ime-input {
+  background-color: var(--vscode-editor-background) !important;
+  color: var(--vscode-editor-foreground) !important;
+}
+
+.monaco-editor .margin,
+.monaco-editor .margin-view-overlays {
+  background-color: var(--vscode-editorGutter-background, var(--vscode-editor-background)) !important;
+}
+
+.monaco-editor .margin-view-overlays .line-numbers {
+  color: var(--vscode-editorLineNumber-foreground) !important;
+}
+
+.monaco-editor .margin-view-overlays .line-numbers.active-line-number {
+  color: var(--vscode-editorLineNumber-activeForeground, var(--vscode-editorLineNumber-foreground)) !important;
+}
+
+.monaco-editor .view-overlays .current-line {
+  background-color: var(--vscode-editor-lineHighlightBackground, transparent) !important;
+  border-color: var(--vscode-editor-lineHighlightBorder, transparent) !important;
+}
+
+.monaco-editor .cursors-layer .cursor {
+  background-color: var(--vscode-editorCursor-foreground) !important;
+  color: var(--vscode-editorCursor-background, var(--vscode-editor-background)) !important;
+  box-shadow: 0 0 0 1px var(--vscode-editorCursor-foreground);
+}
+
+.monaco-editor .view-overlays .selected-text {
+  background-color: var(--vscode-editor-selectionBackground) !important;
+}
+
+.monaco-editor:not(.focused) .view-overlays .selected-text {
+  background-color: var(--vscode-editor-inactiveSelectionBackground, var(--vscode-editor-selectionBackground)) !important;
+}
+
+.monaco-editor .selectionHighlight {
+  background-color: var(--vscode-editor-selectionHighlightBackground, transparent) !important;
+}
+
+.monaco-editor .wordHighlight {
+  background-color: var(--vscode-editor-wordHighlightBackground, transparent) !important;
+}
+
+.monaco-editor .wordHighlightStrong {
+  background-color: var(--vscode-editor-wordHighlightStrongBackground, transparent) !important;
+}
+
+.monaco-editor .mtkw {
+  color: var(--vscode-editorWhitespace-foreground) !important;
+}
+
+.monaco-editor .lines-content .core-guide {
+  box-shadow: 1px 0 0 0 var(--vscode-editorIndentGuide-background1, var(--vscode-editorIndentGuide-background, transparent)) inset !important;
+}
+
+.monaco-editor .lines-content .core-guide-indent-active {
+  box-shadow: 1px 0 0 0 var(--vscode-editorIndentGuide-activeBackground1, var(--vscode-editorIndentGuide-activeBackground, transparent)) inset !important;
+}
+
+.monaco-editor .view-ruler {
+  box-shadow: 1px 0 0 0 var(--vscode-editorRuler-foreground, transparent) inset !important;
+}
+
+.monaco-editor .decorationsOverviewRuler {
+  border-left: 1px solid var(--vscode-editorOverviewRuler-border, transparent) !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider {
+  background: var(--vscode-scrollbarSlider-background) !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, var(--vscode-scrollbarSlider-background)) !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider.active {
+  background: var(--vscode-scrollbarSlider-activeBackground, var(--vscode-scrollbarSlider-background)) !important;
+}
+
+.monaco-editor .sticky-widget {
+  background-color: var(--vscode-editorStickyScroll-background, var(--vscode-editor-background)) !important;
+}
