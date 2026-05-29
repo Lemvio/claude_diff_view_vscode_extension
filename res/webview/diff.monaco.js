@@ -59,9 +59,15 @@
       viewZoneIds: [],
       hoveredHunkIdx: -1,
       didAutoReveal: false,
-      currentTheme: 'vs-dark',
+      currentTheme: null,
       inFlight: false,
     };
+
+    function flushCursor() {
+      const pos = state.editor && state.editor.getPosition();
+      if (!pos) { return; }
+      vscodeApi.postMessage({ type: 'cursor', line: pos.lineNumber, column: pos.column });
+    }
 
     function setInFlight(value) {
       state.inFlight = value;
@@ -159,11 +165,13 @@
     document.getElementById('btn-accept-file').addEventListener('click', () => {
       if (state.inFlight) { return; }
       setInFlight(true);
+      flushCursor();
       vscodeApi.postMessage({ type: 'acceptAll' });
     });
     document.getElementById('btn-reject-file').addEventListener('click', () => {
       if (state.inFlight) { return; }
       setInFlight(true);
+      flushCursor();
       vscodeApi.postMessage({ type: 'rejectAll' });
     });
     document.getElementById('btn-prev-hunk').addEventListener('click', () => {
@@ -501,6 +509,7 @@
         run: () => {
           if (state.inFlight) { return; }
           setInFlight(true);
+          flushCursor();
           vscodeApi.postMessage({ type: 'acceptAll' });
         },
       });
