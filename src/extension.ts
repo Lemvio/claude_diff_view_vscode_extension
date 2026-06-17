@@ -4,6 +4,7 @@ import { DiffEditorProvider, DIFF_EDITOR_VIEW_TYPE } from './diff/diffWebviewPan
 import { IAiRunner } from './runner/aiRunner';
 import { HookWatcher } from './watcher/hookWatcher';
 import { WorkspaceWatcher } from './watcher/workspaceWatcher';
+import { refreshTextFileRules } from './watcher/fileSnapshotStore';
 import { GitBranchWatcher } from './watcher/gitBranchWatcher';
 import { registerAllCommands } from './commands/commandsRegistry';
 import { NavigationManager } from './diff/navigationManager';
@@ -11,6 +12,8 @@ import { NavBarPanel } from './views/navBarPanel';
 import { TerminalPanelProvider } from './terminal/terminalPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
+  refreshTextFileRules();
+
   const diffManager       = new DiffManager(context);
   const workspaceWatcher  = new WorkspaceWatcher(diffManager);
   const fsHookWatcher     = new HookWatcher(diffManager);
@@ -42,6 +45,17 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => workspaceWatcher.dispose() },
     { dispose: () => gitBranchWatcher.dispose() },
     { dispose: () => activeRunner?.cancel?.() }
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('ai-cli-diff-view.supportedFileDetectionMode') ||
+          e.affectsConfiguration('ai-cli-diff-view.supportedFileExtensions') ||
+          e.affectsConfiguration('ai-cli-diff-view.supportedFilenames') ||
+          e.affectsConfiguration('ai-cli-diff-view.supportedFilenamePatterns')) {
+        refreshTextFileRules();
+      }
+    })
   );
 
   const terminalPanel = new TerminalPanelProvider(context, diffManager);

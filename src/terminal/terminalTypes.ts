@@ -16,6 +16,10 @@ export interface TerminalSettings {
   cursorBlink: boolean;
 }
 
+export interface TerminalSettingsPayload extends TerminalSettings {
+  supportedFileExtensions: string[];
+}
+
 export type IncomingMessage =
   | { type: 'ready' }
   | { type: 'createSession'; cols: number; rows: number }
@@ -24,7 +28,8 @@ export type IncomingMessage =
   | { type: 'resize'; id: string; cols: number; rows: number }
   | { type: 'restart'; id: string }
   | { type: 'getSettings' }
-  | { type: 'updateSettings'; settings: TerminalSettings }
+  | { type: 'updateSettings'; settings: TerminalSettingsPayload }
+  | { type: 'promptFileExtensions'; action: 'new' | 'edit'; value?: string }
   | { type: 'installFont'; primary: string }
   | { type: 'reloadWindow' }
   | { type: 'openFile'; path: string }

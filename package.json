@@ -2,7 +2,7 @@
   "name": "ai-cli-diff-view",
   "displayName": "AI CLI diff view",
   "description": "Inline diff review for AI CLI edits, best with Claude, Codex, and Qwen",
-  "version": "3.1.4",
+  "version": "3.3.1",
   "publisher": "konan1947",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,44 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "AI CLI Diff View",
+      "properties": {
+        "ai-cli-diff-view.supportedFileDetectionMode": {
+          "type": "string",
+          "enum": [
+            "defaultAndCustom",
+            "customOnly"
+          ],
+          "default": "defaultAndCustom",
+          "description": "Controls whether AI CLI Diff View uses its built-in text file rules together with custom settings, or only the custom settings."
+        },
+        "ai-cli-diff-view.supportedFileExtensions": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional file extensions that AI CLI Diff View should treat as text files. Entries may be written with or without a leading dot."
+        },
+        "ai-cli-diff-view.supportedFilenames": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional exact filenames that AI CLI Diff View should treat as text files."
+        },
+        "ai-cli-diff-view.supportedFilenamePatterns": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional filename glob patterns that AI CLI Diff View should treat as text files. Patterns match only the basename and support * and ? wildcards."
+        }
+      }
+    },
     "customEditors": [
       {
         "viewType": "ai-cli-diff-view.diffEditor",

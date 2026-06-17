@@ -14,6 +14,7 @@ import {
   DEFAULT_SETTINGS,
   IncomingMessage,
   TerminalSettings,
+  TerminalSettingsPayload,
   ThemePreset,
 } from './terminalTypes';
 
@@ -192,6 +193,51 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
     await this.context.globalState.update(SETTINGS_KEY, s);
   }
 
+  private loadSettingsPayload(): TerminalSettingsPayload {
+    return {
+      ...this.loadSettings(),
+      supportedFileExtensions: this.loadSupportedFileExtensions(),
+    };
+  }
+
+  private loadSupportedFileExtensions(): string[] {
+    const config = vscode.workspace.getConfiguration('ai-cli-diff-view');
+    return this.normalizeSupportedFileExtensions(config.get<string[]>('supportedFileExtensions', []));
+  }
+
+  private normalizeSupportedFileExtensions(values: unknown): string[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const value of values) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+      const ext = value.trim().toLowerCase();
+      if (!ext) {
+        continue;
+      }
+      const withDot = ext.startsWith('.') ? ext : `.${ext}`;
+      if (!seen.has(withDot)) {
+        seen.add(withDot);
+        normalized.push(withDot);
+      }
+    }
+    return normalized;
+  }
+
+  private async saveSupportedFileExtensions(values: unknown): Promise<void> {
+    const config = vscode.workspace.getConfiguration('ai-cli-diff-view');
+    await config.update(
+      'supportedFileExtensions',
+      this.normalizeSupportedFileExtensions(values),
+      vscode.ConfigurationTarget.Global
+    );
+  }
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     const xtermDir = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'xterm');
@@ -268,7 +314,7 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
           return;
         }
         case 'getSettings':
-          this.view?.webview.postMessage({ type: 'settings', settings: this.loadSettings() });
+          this.view?.webview.postMessage({ type: 'settings', settings: this.loadSettingsPayload() });
           return;
         case 'installFont': {
           const font = findInstallableForPrimary(msg.primary || '');
@@ -304,6 +350,28 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
         case 'reloadWindow':
           void vscode.commands.executeCommand('workbench.action.reloadWindow');
           return;
+        case 'promptFileExtensions': {
+          const isEdit = msg.action === 'edit';
+          void vscode.window.showInputBox({
+            title: isEdit ? 'Edit file extension' : 'New file extension',
+            prompt: isEdit
+              ? 'Enter one file extension.'
+              : 'Enter one extension or multiple extensions separated by commas.',
+            value: isEdit && typeof msg.value === 'string' ? msg.value : '',
+            placeHolder: isEdit ? '.env' : '.env, .blade.php, .proto',
+          }).then((value) => {
+            if (typeof value !== 'string') {
+              return;
+            }
+            this.view?.webview.postMessage({
+              type: 'fileExtensionsPromptResult',
+              action: msg.action,
+              previousValue: msg.value,
+              value,
+            });
+          });
+          return;
+        }
         case 'updateSettings': {
           const next = this.loadSettings();
           const incoming = msg.settings ?? next;
@@ -323,8 +391,11 @@ export class TerminalPanelProvider implements vscode.WebviewViewProvider {
             cursorStyle: this.normalizeCursorStyle(incoming.cursorStyle),
             cursorBlink: typeof incoming.cursorBlink === 'boolean' ? incoming.cursorBlink : next.cursorBlink,
           };
-          void this.saveSettings(sanitized).then(() => {
-            this.view?.webview.postMessage({ type: 'settings', settings: sanitized });
+          void Promise.all([
+            this.saveSettings(sanitized),
+            this.saveSupportedFileExtensions(incoming.supportedFileExtensions),
+          ]).then(() => {
+            this.view?.webview.postMessage({ type: 'settings', settings: this.loadSettingsPayload() });
           });
           return;
         }

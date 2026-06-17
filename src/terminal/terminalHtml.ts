@@ -332,9 +332,66 @@ export function buildTerminalHtml(args: BuildTerminalHtmlArgs): string {
     cursor: pointer;
   }
   .field input[type="checkbox"] { margin: 0; }
+  .field.file-ext-field {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .field.file-ext-field > label {
+    flex: none;
+  }
   .field.indent { padding-left: 16px; }
   .color-row { display: flex; align-items: center; gap: 8px; }
   .color-row span { font-family: var(--vscode-editor-font-family, monospace); opacity: 0.7; font-size: 11px; }
+  .file-ext-controls {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .file-ext-list {
+    width: 100%;
+    min-height: 104px;
+    max-height: 160px;
+    overflow: auto;
+    border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.4));
+    background: var(--vscode-input-background, #2a2a2a);
+  }
+  .file-ext-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  .file-ext-table th,
+  .file-ext-table td {
+    padding: 4px 6px;
+    text-align: left;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.22));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-ext-table th {
+    font-weight: 600;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editorWidget-background, rgba(128,128,128,0.08));
+  }
+  .file-ext-table tr {
+    cursor: default;
+  }
+  .file-ext-table tbody tr.selected {
+    color: var(--vscode-list-activeSelectionForeground, #ffffff);
+    background: var(--vscode-list-activeSelectionBackground, #094771);
+  }
+  .file-ext-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .setting-help {
+    color: var(--vscode-descriptionForeground, rgba(128,128,128,0.9));
+    font-size: 11px;
+  }
 
   .install-controls { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
   .install-status { font-size: 11px; opacity: 0.8; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -582,6 +639,25 @@ ${FONT_OPTIONS.map((f) => {
         <div class="field">
           <label for="f-cursor-blink">Cursor blink</label>
           <input id="f-cursor-blink" type="checkbox">
+        </div>
+        <div class="field file-ext-field">
+          <label>Custom file extensions</label>
+          <div class="file-ext-controls">
+            <div class="file-ext-list">
+              <table class="file-ext-table" aria-label="Custom file extensions">
+                <thead>
+                  <tr><th>Extension</th></tr>
+                </thead>
+                <tbody id="file-ext-body"></tbody>
+              </table>
+            </div>
+            <div class="file-ext-actions">
+              <button id="btn-ext-new" class="btn btn-secondary" type="button">New...</button>
+              <button id="btn-ext-edit" class="btn btn-secondary" type="button">Edit...</button>
+              <button id="btn-ext-delete" class="btn btn-secondary" type="button">Delete</button>
+            </div>
+            <div class="setting-help">New accepts one extension or multiple extensions separated by commas.</div>
+          </div>
         </div>
 
         <div class="actions">
@@ -1001,6 +1077,12 @@ ${FONT_OPTIONS.map((f) => {
           showError('PTY error: ' + msg.message);
         } else if (msg.type === 'settings') {
           applySettings(msg.settings);
+        } else if (msg.type === 'fileExtensionsPromptResult') {
+          if (msg.action === 'edit') {
+            applyEditedFileExtension(msg.previousValue, msg.value);
+          } else {
+            addFileExtensions(msg.value);
+          }
         } else if (msg.type === 'installProgress') {
           setInstallStatus(msg.message || 'Installing…', '');
         } else if (msg.type === 'installDone') {
@@ -1088,7 +1170,86 @@ ${FONT_OPTIONS.map((f) => {
       const fCursorHex = document.getElementById('f-cursor-hex');
       const fCursorStyle = document.getElementById('f-cursor-style');
       const fCursorBlink = document.getElementById('f-cursor-blink');
+      const fileExtBody = document.getElementById('file-ext-body');
+      const btnExtNew = document.getElementById('btn-ext-new');
+      const btnExtEdit = document.getElementById('btn-ext-edit');
+      const btnExtDelete = document.getElementById('btn-ext-delete');
       const customRows = document.querySelectorAll('.custom-only');
+      let fileExtensions = [];
+      let selectedFileExt = '';
+
+      function parseFileExtensions(value) {
+        const seen = new Set();
+        const result = [];
+        String(value || '').split(/[,\\n]/).forEach((part) => {
+          const trimmed = part.trim().toLowerCase();
+          if (!trimmed) return;
+          const ext = trimmed.startsWith('.') ? trimmed : '.' + trimmed;
+          if (seen.has(ext)) return;
+          seen.add(ext);
+          result.push(ext);
+        });
+        return result;
+      }
+
+      function renderFileExtensions() {
+        fileExtBody.innerHTML = '';
+        fileExtensions.forEach((ext) => {
+          const row = document.createElement('tr');
+          row.dataset.ext = ext;
+          row.className = ext === selectedFileExt ? 'selected' : '';
+          const cell = document.createElement('td');
+          cell.textContent = ext;
+          row.appendChild(cell);
+          row.addEventListener('click', () => {
+            selectedFileExt = ext;
+            renderFileExtensions();
+          });
+          row.addEventListener('dblclick', () => editSelectedFileExtension());
+          fileExtBody.appendChild(row);
+        });
+        const hasSelection = fileExtensions.includes(selectedFileExt);
+        btnExtEdit.disabled = !hasSelection;
+        btnExtDelete.disabled = !hasSelection;
+      }
+
+      function setFileExtensions(values) {
+        fileExtensions = parseFileExtensions(Array.isArray(values) ? values.join('\\n') : '');
+        if (!fileExtensions.includes(selectedFileExt)) {
+          selectedFileExt = fileExtensions[0] || '';
+        }
+        renderFileExtensions();
+      }
+
+      function addFileExtensions(raw) {
+        const additions = parseFileExtensions(raw);
+        if (!additions.length) return;
+        const seen = new Set(fileExtensions);
+        additions.forEach((ext) => {
+          if (!seen.has(ext)) {
+            seen.add(ext);
+            fileExtensions.push(ext);
+          }
+        });
+        selectedFileExt = additions[additions.length - 1];
+        renderFileExtensions();
+      }
+
+      function editSelectedFileExtension() {
+        if (!fileExtensions.includes(selectedFileExt)) return;
+        vscode.postMessage({ type: 'promptFileExtensions', action: 'edit', value: selectedFileExt });
+      }
+
+      function applyEditedFileExtension(previousValue, nextValue) {
+        if (!fileExtensions.includes(previousValue)) return;
+        const next = parseFileExtensions(nextValue)[0];
+        if (!next) return;
+        const idx = fileExtensions.indexOf(previousValue);
+        fileExtensions = fileExtensions.filter((ext) => ext !== previousValue && ext !== next);
+        fileExtensions.splice(Math.min(idx, fileExtensions.length), 0, next);
+        selectedFileExt = next;
+        renderFileExtensions();
+      }
 
       function populateForm(s) {
         fFontFamily.value = s.fontFamily;
@@ -1113,6 +1274,7 @@ ${FONT_OPTIONS.map((f) => {
         fCursorHex.textContent = s.customColors.cursor;
         fCursorStyle.value = s.cursorStyle;
         fCursorBlink.checked = s.cursorBlink;
+        setFileExtensions(s.supportedFileExtensions);
         toggleCustomRows();
       }
 
@@ -1134,6 +1296,7 @@ ${FONT_OPTIONS.map((f) => {
           },
           cursorStyle: fCursorStyle.value,
           cursorBlink: !!fCursorBlink.checked,
+          supportedFileExtensions: fileExtensions.slice(),
         };
       }
 
@@ -1200,6 +1363,17 @@ ${FONT_OPTIONS.map((f) => {
         const next = readForm();
         vscode.postMessage({ type: 'updateSettings', settings: next });
         overlay.hidden = true;
+      });
+      btnExtNew.addEventListener('click', () => {
+        vscode.postMessage({ type: 'promptFileExtensions', action: 'new' });
+      });
+      btnExtEdit.addEventListener('click', editSelectedFileExtension);
+      btnExtDelete.addEventListener('click', () => {
+        if (!fileExtensions.includes(selectedFileExt)) return;
+        const idx = fileExtensions.indexOf(selectedFileExt);
+        fileExtensions = fileExtensions.filter((ext) => ext !== selectedFileExt);
+        selectedFileExt = fileExtensions[Math.min(idx, fileExtensions.length - 1)] || '';
+        renderFileExtensions();
       });
       fFontFamily.addEventListener('change', updateInstallRow);
       fPreset.addEventListener('change', toggleCustomRows);
